@@ -141,6 +141,16 @@ layer_registry = {
         'module': layers.channel_mixer_rwkv6_wrapped,
         'cfg': 'configs/layers/rwkv6-channel-mixer.yml',
         'shorthand': 'R6c'
+    },
+    'delta': {
+        'module': layers.DeltaAttention,
+        'cfg': 'configs/layers/delta.yml',
+        'shorthand': 'delta'
+    },
+    'flex': {
+        'module': layers.FlexAttention,
+        'cfg': 'configs/layers/flex.yml',
+        'shorthand': 'flex'
     }
 }
 

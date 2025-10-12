@@ -38,6 +38,7 @@ def generate_data(
     num_train_examples: int,
     num_test_examples: int,
     num_workers: int,
+    use_cache: bool = True,
     verbose: bool = True
 ):
     """
@@ -68,7 +69,7 @@ def generate_data(
         verbose=verbose
     )
 
-    if train_data_path is not None and train_data_exists:
+    if train_data_path is not None and train_data_exists and use_cache:
         if verbose:
             print(f'Training data exists, loading from: {train_data_path}')
         training_dataset.load_data(train_data_path)
@@ -91,13 +92,14 @@ def generate_data(
     test_data_exists = os.path.exists(test_data_path)
     test_instance_fn_kwargs = dict(instance_fn_kwargs)
     test_instance_fn_kwargs['is_training'] = False
+    test_instance_fn_kwargs['seq_len'] = test_instance_fn_kwargs['test_seq_len']
     test_dataset = MemoryDataset(
         instance_fn=instance_fn,
         instance_fn_kwargs=test_instance_fn_kwargs,
         verbose=verbose
     )
 
-    if test_data_path is not None and test_data_exists:
+    if test_data_path is not None and test_data_exists and use_cache:
         if verbose:
             print(f'Test data exists, loading from: {test_data_path}')
         test_dataset.load_data(test_data_path)
@@ -204,6 +206,7 @@ class MemoryDataset(torch.utils.data.Dataset):
 
         if self.verbose:
             print(f'Generating dataset with {num_examples} examples, using {num_workers} workers...')
+            print(self.instance_fn_kwargs)
         
         # parallel data generation:
         if num_workers > 1:

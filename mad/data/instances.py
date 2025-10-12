@@ -1,7 +1,7 @@
 import typing as tp
-import numpy as np
 from itertools import permutations
 
+import numpy as np
 
 # utils:
 
@@ -75,11 +75,13 @@ def generate_in_context_recall_instance(
     # generate inputs/targets:
     kv_map = {}
     inputs, targets = [], []
+    train_targets = []
     keys_presented = {}
     kv_motif_size = 2
     assert seq_len % kv_motif_size == 0, "seq_len must be an even number"
     num_kv_pairs = seq_len // kv_motif_size
     not_noise_idx = rng.choice(num_kv_pairs) # make sure we have at least one key-value pair in the sequence
+    # print(key_vocab, value_vocab, noise_vocab)
     for i in range(num_kv_pairs-1): # subtract one to account for final key-value pair
         
         # determine if noise or kv pair collected:
@@ -90,6 +92,7 @@ def generate_in_context_recall_instance(
             noise = rng.choice(noise_vocab, size=kv_motif_size, replace=True)
             inputs += list(noise)
             targets += [target_ignore_idx]*kv_motif_size
+            train_targets += [target_ignore_idx]*kv_motif_size
         
         # collect kv pair:
         else:
@@ -106,13 +109,17 @@ def generate_in_context_recall_instance(
             inputs.append(v)
             
             targets.append(target_ignore_idx)
+            train_targets.append(target_ignore_idx)
             if k not in keys_presented:
                 targets.append(target_ignore_idx)
+                train_targets.append(v)
             else:
                 if multi_query:
                     targets.append(v) # probe value if key has been presented before
+                    train_targets.append(v)
                 else:
                     targets.append(target_ignore_idx)
+                    train_targets.append(v)
 
             keys_presented[k] = v   
 
@@ -127,15 +134,20 @@ def generate_in_context_recall_instance(
     
     if not multi_query:
         targets.append(-100) # copy prefix
+        train_targets.append(-100) # copy prefix
     targets.append(-100) # k_probe
+    train_targets.append(-100) # k_probe
     targets.append(v_probe)
+    train_targets.append(v_probe)
                    
     inputs = np.array(inputs).astype(int)
     targets = np.array(targets).astype(int)
+    train_targets = np.array(train_targets).astype(int)
 
     if is_training:
         # autoregressive shift
-        return inputs[:-1], inputs[1:] # use shifted inputs as targets for training
+        # return inputs[:-1], inputs[1:] # use shifted inputs as targets for training
+        return inputs[:-1], train_targets[1:] # use shifted inputs as targets for training
     else:
         return inputs[:-1], targets[1:]
 
@@ -264,6 +276,7 @@ def generate_fuzzy_in_context_recall_instance(
     keys_presented = {}
     # make sure we dont generate too long sequences
     # we pad later to make sure outupts are of length input_seq_len
+    train_targets = []
     while len(inputs) < seq_len - kv_probe_size - (k_motif_size + v_motif_size): 
 
         # determine key-value motif sizes:
@@ -275,6 +288,9 @@ def generate_fuzzy_in_context_recall_instance(
             inputs.extend(k_probe)
             inputs.extend(v_probe)
             targets.extend(tuple([target_ignore_idx]*(k_probe_size+len(v_probe))))
+            train_targets.extend(tuple([target_ignore_idx]*k_probe_size))
+            train_targets.extend(v_probe)
+
             kv_map[k_probe_size][k_probe] = v_probe
             keys_presented[k_probe] = v_probe
             probe_added = True
@@ -289,6 +305,7 @@ def generate_fuzzy_in_context_recall_instance(
             noise = rng.choice(noise_vocab, size=noise_size, replace=True)
             inputs.extend(noise)
             targets.extend(tuple([target_ignore_idx]*noise_size))
+            train_targets.extend(tuple([target_ignore_idx]*noise_size))
 
         # collect key-value pair:
         else:
@@ -310,15 +327,20 @@ def generate_fuzzy_in_context_recall_instance(
             
             # determine targets:
             targets.extend(tuple([target_ignore_idx]*k_size))
+            train_targets.extend(tuple([target_ignore_idx]*k_size))
             if k not in keys_presented:
                 targets.extend(tuple([target_ignore_idx]*len(v)))
+                train_targets.extend(v)
             else:
                 if multi_query:
                     targets.extend(v) # probe value if key has been presented before
+                    train_targets.extend(v)
                 else:
                     targets.extend(tuple([target_ignore_idx]*len(v))) 
+                    train_targets.extend(v) 
 
             keys_presented[k] = v   
+            # print(k, v)
 
     # add a final key-value pair to the sequence as well as a copy-prefix:
     if not multi_query:
@@ -326,23 +348,30 @@ def generate_fuzzy_in_context_recall_instance(
     inputs.extend(k_probe)
     inputs.extend(v_probe)
 
+    # print(k_probe, v_probe)
+
     if not multi_query:
         targets.extend(tuple([-100]))
     targets.extend(tuple([-100]*k_probe_size))
     targets.extend(v_probe)
+    train_targets.extend(tuple([-100]*k_probe_size))
+    train_targets.extend(v_probe)
                    
     inputs = np.array(inputs).astype(int)
     targets = np.array(targets).astype(int)
+    train_targets = np.array(train_targets).astype(int)
 
     # pad inputs/targets to seq_len:
     if len(inputs)<(seq_len+1): # add one to account for autoregressive shift
         n_pad = seq_len+1-len(inputs)
         inputs = np.concatenate([np.array([pad_token]*n_pad), inputs])
         targets = np.concatenate([np.array([target_ignore_idx]*n_pad), targets])
+        train_targets = np.concatenate([np.array([target_ignore_idx]*n_pad), train_targets])
     
     if is_training:
         # autoregressive shift
-        return inputs[:-1], inputs[1:] # use shifted inputs as targets for training
+        # return inputs[:-1], inputs[1:] # use shifted inputs as targets for training
+        return inputs[:-1], train_targets[1:] # use shifted inputs as targets for training
     else:
         return inputs[:-1], targets[1:]
 

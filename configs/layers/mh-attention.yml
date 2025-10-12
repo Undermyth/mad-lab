@@ -1,6 +1,6 @@
-dim: 128
+dim: 16
 causal: true
-n_heads: 16
+n_heads: 4
 rotary_emb_dim: 8
 dropout: 0
 window_size: [-1, -1]

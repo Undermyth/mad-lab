@@ -63,6 +63,7 @@ KEY_TO_SHORTHAND = {
     'task': 't',
     'vocab_size': 'vs',
     'seq_len': 'sl',
+    'test_seq_len': 'tl',
     'num_train_examples': 'ntr',
     'num_test_examples': 'nte',
     'k_motif_size': 'km',
@@ -122,6 +123,7 @@ def make_log_path(
     for k in [
         'vocab_size',
         'seq_len',
+        'test_seq_len',
         'num_train_examples',
         'num_test_examples',
         'k_motif_size',
@@ -170,6 +172,7 @@ def make_dataset_path(mad_config, **kwargs):
     for k in [
         'vocab_size',
         'seq_len',
+        "test_seq_len",
         'num_train_examples',
         'num_test_examples',
         'k_motif_size',

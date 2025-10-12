@@ -34,6 +34,7 @@ class MADConfig(BaseConfig):
     task: str = 'in-context-recall'
     vocab_size: int = 16
     seq_len: int = 128
+    test_seq_len: int = 4096
     frac_noise: float = 0.0
     noise_vocab_size: int = 0
     num_tokens_to_copy: int = 0
@@ -47,6 +48,7 @@ class MADConfig(BaseConfig):
     data_path: str = './data'
     num_data_workers: int = 0
     persistent_data_workers: bool = True
+    use_cache: bool = True
 
     # training settings:
     batch_size: int = 128
@@ -63,7 +65,7 @@ class MADConfig(BaseConfig):
     accelerator: str = 'cuda'
     devices: int = 1
     save_checkpoints: bool = True 
-    precision: str = 'bf16'
+    precision: str = 'bf16-mixed'
 
     # misc:
     seed: int = 12345
@@ -97,6 +99,7 @@ class MADConfig(BaseConfig):
         return dict(
             vocab_size=self.vocab_size,
             seq_len=self.seq_len,
+            test_seq_len=self.test_seq_len,
             k_motif_size=self.k_motif_size,
             v_motif_size=self.v_motif_size,
             frac_noise=self.frac_noise,

@@ -24,6 +24,7 @@ def get_args():
     parser.add_argument('--task', type=str, default='in-context-recall', choices=list(task_registry.keys()), help='task to train model on')
     parser.add_argument('--vocab-size', type=int, default=16, help='size of token vocabulary')
     parser.add_argument('--seq-len', type=int, default=128, help='length of input sequences')
+    parser.add_argument('--test-seq-len', type=int, default=4096)
     parser.add_argument('--num-train-examples', type=int, default=12_800, help='number of training examples')
     parser.add_argument('--num-test-examples', type=int, default=1_280, help='number of test examples')
     parser.add_argument('--frac-noise', type=float, default=0., help='fraction of input sequence that is noise')
@@ -67,6 +68,7 @@ def get_args():
     parser.add_argument('--data-path', type=str, default='./data', help='path where generated data are stored')
     parser.add_argument('--num-data-workers', type=int, default=0, help='number of workers for data generation and data loading')
     parser.add_argument('--persistent-data-workers', action=argparse.BooleanOptionalAction, default=True, help='if True, data workers are kept alive between epochs')
+    parser.add_argument('--use-cache', action=argparse.BooleanOptionalAction, default=True)
 
     # misc:
     parser.add_argument('--seed', type=int, default=12345, help='random seed for reproducibility')
@@ -117,7 +119,7 @@ def train(
 
     # Check if results exist already.
 
-    if os.path.exists(log_path):
+    if os.path.exists(log_path) and mad_config.use_cache:
         path_results_df = os.path.join(log_path, 'results.csv')
         if os.path.exists(path_results_df):
             results_df = pd.read_csv(path_results_df)
@@ -139,7 +141,8 @@ def train(
         test_data_path=mad_config.test_dataset_path,
         num_train_examples=mad_config.num_train_examples,
         num_test_examples=mad_config.num_test_examples,
-        num_workers=mad_config.num_data_workers
+        num_workers=mad_config.num_data_workers,
+        use_cache=mad_config.use_cache
     )
 
     # Make Dataloaders.
@@ -221,6 +224,7 @@ def train(
         logger=loggers,
         enable_checkpointing=mad_config.save_checkpoints,
         callbacks=callbacks,
+        accumulate_grad_batches=4,
         precision=mad_config.precision,
     )
 
@@ -274,6 +278,9 @@ if __name__ == '__main__':
         mad_config=mad_config,
         model_id=model_id
     )
+
+    print(model)
+    
     train(
         model=model,
         mad_config=mad_config,

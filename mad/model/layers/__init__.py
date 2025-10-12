@@ -10,3 +10,5 @@ from mad.model.layers.hyena import HyenaOperator, MultiHeadHyenaOperator, HyenaE
 from mad.model.layers.mamba import Mamba
 from mad.model.layers.rwkv import time_mixer_rwkv5_wrapped_bf16
 from mad.model.layers.rwkv import time_mixer_rwkv6_wrapped_bf16
+from mad.model.layers.delta import DeltaAttention
+from mad.model.layers.flex_attention import FlexAttention
