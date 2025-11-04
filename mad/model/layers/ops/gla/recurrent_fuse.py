@@ -260,7 +260,7 @@ class FusedRecurrentGLAFunction(torch.autograd.Function):
 
     @staticmethod
     @contiguous
-    @custom_fwd
+    @torch.amp.custom_bwd(device_type='cuda')
     def forward(ctx, q, k, v, gk, gv, scale=None, initial_state=None, output_final_state=False, reverse=False):
         batch_size, n_heads, seq_len, d_head_qk = q.shape
         d_head_v = v.shape[-1]
@@ -313,7 +313,7 @@ class FusedRecurrentGLAFunction(torch.autograd.Function):
 
     @staticmethod
     @contiguous
-    @custom_bwd
+    @torch.amp.custom_bwd(device_type='cuda')
     def backward(ctx, do, d_final_state=None):
         q, k, v, gk, gv, initial_state, o = ctx.saved_tensors
         batch_size, n_heads, seq_len, d_head_qk = q.shape

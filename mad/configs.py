@@ -36,6 +36,7 @@ class MADConfig(BaseConfig):
     seq_len: int = 128
     test_seq_len: int = 4096
     frac_noise: float = 0.0
+    frac_query: float = 0.0
     noise_vocab_size: int = 0
     num_tokens_to_copy: int = 0
     k_motif_size: int = 1
@@ -103,11 +104,13 @@ class MADConfig(BaseConfig):
             k_motif_size=self.k_motif_size,
             v_motif_size=self.v_motif_size,
             frac_noise=self.frac_noise,
+            frac_query=self.frac_query,
             noise_vocab_size=self.noise_vocab_size,
             num_tokens_to_copy=self.num_tokens_to_copy,
             rng=np.random.default_rng(self.seed),
             multi_query=self.multi_query,
-            kv_map=kv_map
+            kv_map=kv_map,
+
         )
 
     @property

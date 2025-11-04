@@ -1,4 +1,4 @@
 dim: 16
 expand_v: 1
 expand_k: 1
-num_heads: 4
+num_heads: 2

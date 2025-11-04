@@ -53,25 +53,43 @@ class PLModelWrap(pl.LightningModule):
     def step(self,
         batch: tuple,
         batch_idx: int
-    ) -> tp.Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tp.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, tp.Union[torch.Tensor, None]]:
         inputs, targets = batch
         outputs = self(inputs)
+        extend = None
+        if isinstance(outputs, tuple):
+            extend = outputs[1]
+            outputs = outputs[0]
         loss = self.loss_fn(
             outputs.view(-1, outputs.size(-1)),
             targets.view(-1)
         )
-        return loss, outputs, targets
+        if extend is not None:
+            mask = (targets != -100)
+            # [B, T, H, 1]
+            extend = extend.squeeze(-1).mean(dim=-1)
+            extend = extend * mask
+            quadratic = extend * (1 - extend)   # [B, T]
+            count = mask.sum(dim=-1)
+            # extend = ((extend + 2 * quadratic).sum(dim=-1) / count).mean()
+            extend = (extend.sum(dim=-1) / count).mean()
+            return loss, outputs, targets, extend
+        else:
+            return loss, outputs, targets, None
     
     def phase_step(self,
         batch: tuple,
         batch_idx: int,
         phase: str='train'
     ) -> tp.Dict[str, tp.Union[torch.Tensor, tp.Any]]:
-        loss, outputs, targets = self.step(batch, batch_idx)
+        loss, outputs, targets, extend = self.step(batch, batch_idx)
+        # extend = torch.log(extend + 1)
+        loss = loss + extend * 10
         self.log(f'{phase}/Loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f'{phase}/AuxLoss', extend * 10, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         metrics = getattr(self, f'{phase}_metrics')(outputs, targets)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        return {'loss': loss, "outputs": outputs, "targets": targets}
+        return {'loss': loss, "extend": extend, "outputs": outputs, "targets": targets}
     
     def training_step(self,
         batch: tuple,

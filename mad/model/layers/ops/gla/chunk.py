@@ -347,7 +347,7 @@ class ChunkGLAFunction(torch.autograd.Function):
 
     @staticmethod
     @contiguous
-    @custom_fwd
+    @torch.amp.custom_bwd(device_type='cuda')
     def forward(ctx, q, k, v, g, scale, initial_state, output_final_state):
         ctx.g_dtype = g.dtype
         g_original = g
@@ -433,7 +433,7 @@ class ChunkGLAFunction(torch.autograd.Function):
 
     @staticmethod
     @contiguous
-    @custom_bwd
+    @torch.amp.custom_bwd(device_type='cuda')
     def backward(ctx, do, d_final_state=None):
         q, k, v, g_origin, A, initial_state, h = ctx.saved_tensors
         batch_size, n_heads, seq_len, d_head_qk = q.shape

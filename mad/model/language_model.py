@@ -64,11 +64,19 @@ class LanguageModel(nn.Module):
             input_embeds = input_embeds + posembs.to(input_embeds.device)
         return self.drop_embed(input_embeds)
     
-    def forward(self, inputs_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs_ids: torch.Tensor) -> tp.Union[torch.Tensor, tp.Tuple[torch.Tensor, torch.Tensor]]:
         x = self.embed(inputs_ids)
+        extend = torch.tensor(0, device=x.device)
         for layer in self.model:
-            x = x + layer(x)
-        return self.unembed(x)
+            output = layer(x)
+            if isinstance(output, tuple):
+                extend = extend + output[1]
+                output = output[0]
+            x = x + output
+        if extend.ndim == 0:
+            return self.unembed(x)
+        else:
+            return self.unembed(x), extend / 2  # [B, T, H, 1]
 
     def _init_weights(self, m, initializer_range=0.02) -> None:
         if isinstance(m, nn.Linear):

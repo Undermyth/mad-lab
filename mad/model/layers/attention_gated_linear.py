@@ -13,7 +13,11 @@ from transformers.activations import ACT2FN
 
 from mad.model.layers.ops.norm.fused_norm_gate import FusedRMSNormSwishGate
 from mad.model.layers.ops.norm.rmsnorm import RMSNorm
-from mad.model.layers.ops.gla import chunk_gla, fused_chunk_gla, fused_recurrent_gla
+from mad.model.layers.ops.gla import chunk_gla, fused_recurrent_gla, fused_chunk_gla
+
+# from fla.ops.gla import fused_chunk_gla
+
+from fla.modules import ShortConvolution
 
 
 class GatedLinearAttention(nn.Module):
@@ -67,6 +71,17 @@ class GatedLinearAttention(nn.Module):
 
         self.gate_logit_normalizer = gate_logit_normalizer
 
+        self.q_conv = ShortConvolution(
+            hidden_size=self.d_model,
+            kernel_size=4,
+            activation='silu'
+        )
+        self.k_conv = ShortConvolution(
+            hidden_size=self.d_model,
+            kernel_size=4,
+            activation='silu'
+        )
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -83,6 +98,12 @@ class GatedLinearAttention(nn.Module):
 
         q = rearrange(self.q_proj(x), 'b n (h d) -> b h n d', h=self.num_heads)
         k = rearrange(self.k_proj(x), 'b n (h d) -> b h n d', h=self.num_heads)
+        # q = self.q_proj(x)
+        # k = self.k_proj(x)
+        # q, _ = self.q_conv(q, output_final_state=False)
+        # k, _ = self.k_conv(k, output_final_state=False)
+        # q = rearrange(q, 'b n (h d) -> b n h d', h=self.num_heads)
+        # k = rearrange(k, 'b n (h d) -> b n h d', h=self.num_heads)
         v = rearrange(self.v_proj(x), 'b n (h d) -> b h n d', h=self.num_heads)
         gk = rearrange(self.gk_proj(x), 'b n (h d) -> b h n d', h=self.num_heads)
         gk = (F.logsigmoid(gk) / self.gate_logit_normalizer)

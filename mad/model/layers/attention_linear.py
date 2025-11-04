@@ -16,6 +16,8 @@ from mad.model.layers.featurization.feature_map import (
     TaylorFeatureMap
 )
 
+from fla.modules import ShortConvolution
+
 try:
     from mad.model.layers.ops.causal_dot_prod import causal_dot_product  # linear attention cuda kernel
 except ImportError:
@@ -72,6 +74,17 @@ class LinearAttention(nn.Module):
 
         self.norm_q = norm_q
         self.norm_k = norm_k
+
+        self.q_conv = ShortConvolution(
+            hidden_size=self.dim,
+            kernel_size=4,
+            activation='silu'
+        )
+        self.k_conv = ShortConvolution(
+            hidden_size=self.dim,
+            kernel_size=4,
+            activation='silu'
+        )
 
     def assign_feature_map(self, feature_map: str, tie_feature_map_qk: bool = False):
         if feature_map == 'hedgehog':
@@ -132,6 +145,8 @@ class LinearAttention(nn.Module):
         """
         b, l, _ = hidden_states.size()
         q, k, v = self.proj_q(hidden_states), self.proj_k(hidden_states), self.proj_v(hidden_states)
+        q, _ = self.q_conv(q, output_final_state=False)
+        k, _ = self.k_conv(k, output_final_state=False)
         q = q.view(b, l, self.num_heads, self.head_qk_dim).transpose(1, 2)
         k = k.view(b, l, self.num_heads, self.head_qk_dim).transpose(1, 2)
         v = v.view(b, l, self.num_heads, self.head_v_dim).transpose(1, 2)
@@ -155,7 +170,7 @@ class LinearAttention(nn.Module):
             A_qk = torch.tril(A_qk)        
             y = torch.einsum("bhnm,bhme->bhne", A_qk.to(x.dtype), v.to(x.dtype))
             z = 1 / (torch.einsum("bhld,bhld->bhl", q, k.cumsum(2)) + self.eps)
-            y = y * z[..., None]
+            # y = y * z[..., None]
             y = rearrange(y, 'b h l d -> b l (h d)')
         
         elif self.parallel_implementation == "linear" and causal_dot_product is not None:

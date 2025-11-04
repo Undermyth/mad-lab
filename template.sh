@@ -1,0 +1,3 @@
+python -m train --task multi-query-fuzzy-recall --num-data-workers 32 --num-train-examples 64000 --devices 1 --vocab-size 128 --k-motif-size 2 --v-motif-size 1 --noise-vocab-size 10 --frac-noise 0.1 --frac-query 0.2 --seq-len 2048 --test-seq-len 2048 --layers switcher swiglu switcher swiglu --dim 64 --weight-decay 0.1 --lr 1e-4
+
+python -m train --task multi-query-fuzzy-recall --num-data-workers 32 --num-train-examples 64000 --devices 1 --vocab-size 128 --k-motif-size 2 --v-motif-size 1 --noise-vocab-size 10 --frac-noise 0.1 --frac-query 0.2 --seq-len 2048 --test-seq-len 2048 --log-to-wandb --wandb-project hoplm --layers switcher swiglu switcher swiglu --dim 64 --weight-decay 0.1 --lr 1e-4

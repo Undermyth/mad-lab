@@ -2,6 +2,7 @@ from mad.data.instances import (
     generate_in_context_recall_instance,
     generate_noisy_in_context_recall_instance,
     generate_fuzzy_in_context_recall_instance,
+    generate_multiquery_fuzzy_in_context_recall_instance,
     generate_memorization_instance,
     generate_compression_instance,
     generate_selective_copying_instance
@@ -25,6 +26,11 @@ task_registry = {
         'instance_fn': generate_fuzzy_in_context_recall_instance,
         'cfg': 'configs/tasks/fuzzy-in-context-recall.yml',
         'shorthand': 'FR'
+    },
+    'multi-query-fuzzy-recall': {
+        'instance_fn': generate_multiquery_fuzzy_in_context_recall_instance,
+        'cfg': 'configs/tasks/multi-query-fuzzy-recall.yml',
+        'shorthand': 'MQFR',
     },
     'memorization': {
         'instance_fn': generate_memorization_instance,
@@ -151,6 +157,16 @@ layer_registry = {
         'module': layers.FlexAttention,
         'cfg': 'configs/layers/flex.yml',
         'shorthand': 'flex'
+    },
+    'conv-attention': {
+        'module': layers.ConvAttention,
+        'cfg': 'configs/layers/conv_attention.yml',
+        'shorthand': 'ca'
+    },
+    'switcher': {
+        'module': layers.Switcher,
+        'cfg': 'configs/layers/switcher.yml',
+        'shorthand': 'swi'
     }
 }
 

@@ -9,12 +9,42 @@ import pandas as pd
 import pytorch_lightning as pl
 
 from torch.utils.data import DataLoader
+import torch.nn as nn
 
 from mad.configs import MADConfig, MADModelConfig
 from mad.paths import make_log_path
 from mad.data import generate_data
 from mad.model import PLModelWrap
 from mad.registry import task_registry, layer_registry
+
+def load_compatible_dict(model, state_dict):
+    """智能加载：只加载形状匹配的权重，并打印不兼容的权重及其原因"""
+    model_dict = model.state_dict()
+    
+    # 过滤出形状匹配的权重
+    compatible_dict = {}
+    incompatible_info = []
+
+    for k, v in state_dict.items():
+        if k in model_dict:
+            if v.shape == model_dict[k].shape:
+                compatible_dict[k] = v
+            else:
+                incompatible_info.append(f"Key: {k}, Reason: Shape mismatch (checkpoint: {v.shape}, model: {model_dict[k].shape})")
+        else:
+            incompatible_info.append(f"Key: {k}, Reason: Key not found in model")
+
+    # 打印不兼容的权重及其原因
+    if incompatible_info:
+        print("Incompatible weights:")
+        for info in incompatible_info:
+            print(info)
+    else:
+        print("All weights are compatible.")
+
+    # 加载过滤后的权重
+    model.load_state_dict(compatible_dict, strict=False)
+    return model
 
 
 def get_args():
@@ -28,6 +58,7 @@ def get_args():
     parser.add_argument('--num-train-examples', type=int, default=12_800, help='number of training examples')
     parser.add_argument('--num-test-examples', type=int, default=1_280, help='number of test examples')
     parser.add_argument('--frac-noise', type=float, default=0., help='fraction of input sequence that is noise')
+    parser.add_argument('--frac-query', type=float, default=0.)
     parser.add_argument('--noise-vocab-size', type=int, default=0, help='size of noise token vocabulary')
     parser.add_argument('--num-tokens-to-copy', type=int, default=0, help='number of tokens to copy in selective-copying')
     parser.add_argument('--k-motif-size', type=int, default=1, help='number of adjacent tokens that together form a key in fuzzy in-context recall')
@@ -51,6 +82,8 @@ def get_args():
     parser.add_argument('--accelerator', type=str, default='cuda', help='accelerator used for training')
     parser.add_argument('--devices', type=int, default=1, help='number of devices to use for training')
     parser.add_argument('--precision', type=str, default='bf16', help='precision of the model (see PyTorch Lightning Trainer docs for details)')
+    parser.add_argument('--load-checkpoint', type=str, default=None)
+    parser.add_argument('--eval-only', action=argparse.BooleanOptionalAction, default=False)
 
     # optimizer settings:
     parser.add_argument('--lr', type=float, default=5e-4, help='learning rate for optimizer')
@@ -93,7 +126,9 @@ def train(
     log_to_csv: bool = True,
     log_to_wandb: bool = False,
     wandb_project: str = 'MAD',
-    save_checkpoints: bool = True
+    save_checkpoints: bool = True,
+    load_checkpoint = None,
+    eval_only: bool = False
 ) -> pd.DataFrame:
     """
     Train a model with given configuration and log results.
@@ -129,8 +164,10 @@ def train(
             shutil.rmtree(log_path)
 
     # PyTorch Lightning Model Wrap.
-
-    model_wrapped = PLModelWrap(model=model, mad_config=mad_config)
+    if load_checkpoint is not None:
+        model_wrapped = PLModelWrap.load_from_checkpoint(load_checkpoint, model=model, mad_config=mad_config)
+    else:
+        model_wrapped = PLModelWrap(model=model, mad_config=mad_config)
 
     # Make Data.
 
@@ -204,7 +241,12 @@ def train(
 
     if log_to_wandb:
         # We import wandb here so it doesn't create any random directories in /tmp
-        # when not used
+        # when not user name, module in model.named_modules():
+    #     if isinstance(module, nn.Linear):
+    #         if 's_proj' in name:
+    #             module.weight.requires_grad = True
+    #         else:
+    #             module.weight.requires_grad = Falsed
         import wandb 
         wandb.init(
             project=wandb_project,
@@ -229,7 +271,10 @@ def train(
     )
 
     # Train.
-
+    if eval_only:
+        result = trainer.test(model_wrapped, test_dl)[0]
+        return result
+    
     trainer.fit(model_wrapped, train_dl, test_dl)
 
     # Evaluate Final Performance.
@@ -280,6 +325,24 @@ if __name__ == '__main__':
     )
 
     print(model)
+    ckpt = torch.load('hybrid-2k-2.ckpt', weights_only=False)
+    state_dict = ckpt['state_dict']
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        # if '.model' in key:
+        #     pos = key.find('.model')
+        #     new_key = key[6:pos] + key[pos+6:]
+        # else:
+        new_key = key[6:]
+        new_state_dict[new_key] = value
+    load_compatible_dict(model, new_state_dict)
+    model.train()
+    # for name, module in model.named_modules():
+    #     if isinstance(module, nn.Linear):
+    #         if 's_proj' in name:
+    #             module.weight.requires_grad = True
+    #         else:
+    #             module.weight.requires_grad = False
     
     train(
         model=model,
@@ -288,5 +351,7 @@ if __name__ == '__main__':
         log_to_csv=args['log_to_csv'],
         log_to_wandb=args['log_to_wandb'],
         wandb_project=args['wandb_project'],
-        save_checkpoints=args['save_checkpoints']
+        save_checkpoints=args['save_checkpoints'],
+        load_checkpoint=args['load_checkpoint'],
+        eval_only=args['eval_only']
     )

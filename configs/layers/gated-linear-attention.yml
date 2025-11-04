@@ -6,5 +6,5 @@ gate_fn: swish
 layernorm_eps: 0.00001
 gate_logit_normalizer: 16
 gate_low_rank_dim: 16
-mode: 'chunk'
+mode: 'fused_chunk'
 fuse_norm: false

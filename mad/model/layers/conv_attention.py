@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import math
-
 from fla.modules import ShortConvolution
+from flash_attn import flash_attn_func
+import torch.nn.functional as F
 
-class FlexAttention(nn.Module):
+
+class ConvAttention(nn.Module):
 
     def __init__(
         self,
@@ -31,19 +31,26 @@ class FlexAttention(nn.Module):
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.o_proj = nn.Linear(dim, dim, bias=False)
 
-        self.q_conv = ShortConvolution(
+        self.q_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
             activation='silu',
         )
-        self.k_conv = ShortConvolution(
+        self.k_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
             activation='silu',
+        )
+        self.v_conv1d = ShortConvolution(
+            hidden_size=self.dim,
+            kernel_size=4,
+            activation='silu'
         )
         
         # RoPE 编码器
         self.rope = RotaryEmbedding(rotary_emb_dim)
+
+        self.o_norm = nn.RMSNorm(self.head_dim, eps=1e-5)
 
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs):
         batch_size, seq_len, _ = hidden_states.shape
@@ -53,8 +60,9 @@ class FlexAttention(nn.Module):
         k = self.k_proj(hidden_states)  # [batch_size, seq_len, dim]
         v = self.v_proj(hidden_states)  # [batch_size, seq_len, dim]
 
-        q, _ = self.q_conv(q, output_final_state=False)
-        k, _ = self.k_conv(k, output_final_state=False)
+        q, _ = self.q_conv1d(q, output_final_state=False)
+        k, _ = self.k_conv1d(k, output_final_state=False)
+        v, _ = self.v_conv1d(v, output_final_state=False)
         
         # 重塑为多头格式
         q = q.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)  # [batch_size, n_heads, seq_len, head_dim]
@@ -63,34 +71,33 @@ class FlexAttention(nn.Module):
         
         # 应用 RoPE 位置编码（仅应用于前 rotary_emb_dim 维度）
         q, k = self.rope(q, k)
-        
-        # 计算注意力分数
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)  # [batch_size, n_heads, seq_len, seq_len]
-        
-        # 应用因果掩码（如果需要）
-        causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=hidden_states.device)).bool()
-        # attn_scores = attn_scores.masked_fill(~causal_mask, float('-inf'))
-        attn_scores = attn_scores.masked_fill(~causal_mask, float(0))
-        
-        # 计算注意力权重
-        # attn_weights = torch.softmax(attn_scores, dim=-1)  # [batch_size, n_heads, seq_len, seq_len]
-        # attn_weights = torch.sigmoid(attn_scores) * attn_scores
-        # attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-5)
-        attn_weights = attn_scores
-        attn_weights = F.dropout(attn_weights, p=0.1, training=True)
-        
-        # 计算输出
-        attn_output = torch.matmul(attn_weights, v)  # [batch_size, n_heads, seq_len, head_dim]
 
-        # attn_output = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # q = q.transpose(1, 2).contiguous()
+        # k = k.transpose(1, 2).contiguous()
+        # v = v.transpose(1, 2).contiguous()
         
-        # 重塑回原始形状
-        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.dim)  # [batch_size, seq_len, dim]
+        # # Cast to bfloat16 before computation
+        # q = q.to(torch.bfloat16)
+        # k = k.to(torch.bfloat16)
+        # v = v.to(torch.bfloat16)
+
+        o = F.scaled_dot_product_attention(
+            q, k, v, 
+            is_causal=True
+        )
+
+        # 使用 Flash Attention 计算注意力
+        # o = flash_attn_func(q, k, v, dropout_p=0., causal=True)
         
-        # 最终线性投影
-        output = self.o_proj(attn_output)  # [batch_size, seq_len, dim]
+        # 调整输出形状以匹配原始序列维度
+        o = o.transpose(1, 2).contiguous()
+        o = self.o_norm(o)
+        o = o.view(batch_size, seq_len, self.dim)
+
+        # 输出投影
+        o = self.o_proj(o)
         
-        return output
+        return o
 
 
 class RotaryEmbedding(nn.Module):
@@ -178,43 +185,3 @@ class RotaryEmbedding(nn.Module):
             x_rot = torch.cat((x_rotary_rot, x_pass), dim=-1)  # [batch_size, n_heads, seq_len, head_dim]
         
         return x_rot
-
-
-if __name__ == "__main__":
-    # 基本测试
-    batch_size = 2
-    seq_len = 10
-    dim = 128
-    n_heads = 4
-    
-    # 创建模块实例 (rotary_emb_dim < head_dim)
-    attention = FlexAttention(dim=dim, n_heads=n_heads, rotary_emb_dim=8)
-    
-    # 创建随机输入
-    x = torch.randn(batch_size, seq_len, dim)
-    
-    # 前向传播
-    output = attention(x)
-    
-    # 验证输出形状
-    print(f"Input shape: {x.shape}")
-    print(f"Output shape: {output.shape}")
-    
-    # 验证输出与输入形状一致
-    assert output.shape == x.shape, f"Output shape {output.shape} does not match input shape {x.shape}"
-    
-    # 测试梯度流
-    loss = output.sum()
-    loss.backward()
-    
-    print("Basic test passed!")
-    print(f"Q proj gradient norm: {attention.q_proj.weight.grad.norm().item():.4f}")
-    print(f"K proj gradient norm: {attention.k_proj.weight.grad.norm().item():.4f}")
-    print(f"V proj gradient norm: {attention.v_proj.weight.grad.norm().item():.4f}")
-    
-    # 测试 rotary_emb_dim == head_dim 的情况
-    print("\nTesting rotary_emb_dim == head_dim:")
-    attention2 = FlexAttention(dim=dim, n_heads=n_heads, rotary_emb_dim=32)  # 32 = head_dim (128/4)
-    output2 = attention2(x)
-    assert output2.shape == x.shape, f"Output shape {output2.shape} does not match input shape {x.shape}"
-    print("Test with rotary_emb_dim == head_dim passed!")
