@@ -41,12 +41,12 @@ class LanguageModel(nn.Module):
         position_embeds = position_embeds(max_length, dim) if position_embeds is not None else None
         self.position_embeds = position_embeds.weight if isinstance(position_embeds, nn.Embedding) else position_embeds
         assert self.position_embeds is None or self.position_embeds.shape == (max_length, dim),\
-              'position embeddings must have shape (max_length, dim)'
+              'position embeddings must have shape (max_length, dim)' 
         self.drop_embed = nn.Dropout(embed_drop_rate)
         
         self.model = nn.ModuleList([])
-        for layer, layer_cfg in zip(layers, layer_cfgs):
-            self.model.append(nn.Sequential(norm(layer_cfg['dim']), layer(**layer_cfg)))
+        for i, (layer, layer_cfg) in enumerate(zip(layers, layer_cfgs)):
+            self.model.append(nn.Sequential(norm(layer_cfg['dim']), layer(**layer_cfg, layer_idx=i)))
         
         self.unembed = nn.Sequential(norm(layer_cfg['dim']), nn.Linear(dim, vocab_size))
         self.apply(self._init_weights)
@@ -66,17 +66,18 @@ class LanguageModel(nn.Module):
     
     def forward(self, inputs_ids: torch.Tensor) -> tp.Union[torch.Tensor, tp.Tuple[torch.Tensor, torch.Tensor]]:
         x = self.embed(inputs_ids)
-        extend = torch.tensor(0, device=x.device)
+        aux_loss = None
         for layer in self.model:
             output = layer(x)
             if isinstance(output, tuple):
-                extend = extend + output[1]
+                aux_loss = output[1] if aux_loss is None else aux_loss + output[1] 
                 output = output[0]
             x = x + output
-        if extend.ndim == 0:
-            return self.unembed(x)
-        else:
-            return self.unembed(x), extend / 2  # [B, T, H, 1]
+        
+        if aux_loss is not None:
+            return self.unembed(x), aux_loss
+        
+        return self.unembed(x)
 
     def _init_weights(self, m, initializer_range=0.02) -> None:
         if isinstance(m, nn.Linear):

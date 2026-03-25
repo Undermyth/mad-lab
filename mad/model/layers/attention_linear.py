@@ -2,26 +2,24 @@
 # https://github.com/sustcsonglin/flash-linear-attention/blob/main/fla/layers/linear_attn.py
 # https://github.com/HazyResearch/based/blob/main/based/models/mixers/linear_attention.py
 
-import math
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
+from fla.modules import ShortConvolution
 
 from mad.model.layers.featurization.feature_map import (
     DPFPFeatureMap,
     HadamardFeatureMap,
     HedgehogFeatureMap,
     T2RFeatureMap,
-    TaylorFeatureMap
+    TaylorFeatureMap,
 )
-
-from fla.modules import ShortConvolution
 
 try:
     from mad.model.layers.ops.causal_dot_prod import causal_dot_product  # linear attention cuda kernel
 except ImportError:
-    print(f"causal_dot_product not installed, using quadratic linear attention implementation!... ")
+    print("causal_dot_product not installed, using quadratic linear attention implementation!... ")
     causal_dot_product = None
 
 
@@ -67,20 +65,25 @@ class LinearAttention(nn.Module):
         )
 
         # initialize projections and feature map
-        self.proj_q = nn.Linear(self.dim, self.key_dim, bias=False)
-        self.proj_k = nn.Linear(self.dim, self.key_dim, bias=False)
-        self.proj_v = nn.Linear(self.dim, self.value_dim , bias=False)
+        self.q_proj = nn.Linear(self.dim, self.key_dim, bias=False)
+        self.k_proj = nn.Linear(self.dim, self.key_dim, bias=False)
+        self.v_proj = nn.Linear(self.dim, self.value_dim , bias=False)
         self.out_proj = nn.Linear(self.value_dim, self.dim, bias=False)
 
         self.norm_q = norm_q
         self.norm_k = norm_k
 
-        self.q_conv = ShortConvolution(
+        self.q_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
             activation='silu'
         )
-        self.k_conv = ShortConvolution(
+        self.k_conv1d = ShortConvolution(
+            hidden_size=self.dim,
+            kernel_size=4,
+            activation='silu'
+        )
+        self.v_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
             activation='silu'
@@ -144,18 +147,19 @@ class LinearAttention(nn.Module):
         y (torch.Tensor): tensor of shape (b, d, l)
         """
         b, l, _ = hidden_states.size()
-        q, k, v = self.proj_q(hidden_states), self.proj_k(hidden_states), self.proj_v(hidden_states)
-        q, _ = self.q_conv(q, output_final_state=False)
-        k, _ = self.k_conv(k, output_final_state=False)
+        q, k, v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
+        q, _ = self.q_conv1d(q, output_final_state=False)
+        k, _ = self.k_conv1d(k, output_final_state=False)
+        v, _ = self.v_conv1d(v, output_final_state=False)
         q = q.view(b, l, self.num_heads, self.head_qk_dim).transpose(1, 2)
         k = k.view(b, l, self.num_heads, self.head_qk_dim).transpose(1, 2)
         v = v.view(b, l, self.num_heads, self.head_v_dim).transpose(1, 2)
             
         q, k = self.feature_map_q(q), self.feature_map_k(k)
         if self.norm_q:
-            q = q / (q.sum(-1, keepdim=True) + 1e-4)
+            q = q / (q.norm(dim=-1, keepdim=True) + 1e-4)
         if self.norm_k:
-            k = k / (k.sum(-1, keepdim=True) + 1e-4)
+            k = k / (k.norm(dim=-1, keepdim=True) + 1e-4)
 
         return self.parallel_forward(hidden_states, q, k, v)
     

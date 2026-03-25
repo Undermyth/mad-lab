@@ -1,26 +1,25 @@
-import os
 import argparse
-import shutil
-import torch
+import os
 import random
+import shutil
 
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
-
+import torch
 from torch.utils.data import DataLoader
-import torch.nn as nn
 
 from mad.configs import MADConfig, MADModelConfig
-from mad.paths import make_log_path
 from mad.data import generate_data
 from mad.model import PLModelWrap
-from mad.registry import task_registry, layer_registry
+from mad.paths import make_log_path
+from mad.registry import layer_registry, task_registry
+
 
 def load_compatible_dict(model, state_dict):
     """智能加载：只加载形状匹配的权重，并打印不兼容的权重及其原因"""
     model_dict = model.state_dict()
-    
+
     # 过滤出形状匹配的权重
     compatible_dict = {}
     incompatible_info = []
@@ -64,12 +63,12 @@ def get_args():
     parser.add_argument('--k-motif-size', type=int, default=1, help='number of adjacent tokens that together form a key in fuzzy in-context recall')
     parser.add_argument('--v-motif-size', type=int, default=1, help='number of adjacent tokens that together form a value in fuzzy in-context recall')
     parser.add_argument('--multi-query', action=argparse.BooleanOptionalAction, default=True, help='if True, multi-query variant of in-context recall tasks is used')
-    
+
     # model settings:
     parser.add_argument('--layers', nargs='+', default=['mh-attention', 'swiglu', 'mh-attention', 'swiglu'], help='layers of model')
     parser.add_argument('--backbone', type=str, default='language-model', help='model backbone used for layers')
     parser.add_argument('--dim', type=int, default=128, help='width of the model (will be enforced for all layers)')
-    
+
     # training settings:
     parser.add_argument('--batch-size', type=int, default=128, help='batch size for training and evaluation')
     parser.add_argument('--epochs', type=int, default=200, help='maximum number of epochs to train')
@@ -83,6 +82,7 @@ def get_args():
     parser.add_argument('--devices', type=int, default=1, help='number of devices to use for training')
     parser.add_argument('--precision', type=str, default='bf16', help='precision of the model (see PyTorch Lightning Trainer docs for details)')
     parser.add_argument('--load-checkpoint', type=str, default=None)
+    parser.add_argument('--allow-compatible', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--eval-only', action=argparse.BooleanOptionalAction, default=False)
 
     # optimizer settings:
@@ -90,7 +90,7 @@ def get_args():
     parser.add_argument('--min-lr', type=float, default=1e-6, help='minimum learning rate for cosine learning rate scheduler')
     parser.add_argument('--weight-decay', type=float, default=0., help='weight decay for optimizer')
 
-    # logging: 
+    # logging:
     parser.add_argument('--log-base-path', type=str, default='./logs', help='path where training logs are stored')
     parser.add_argument('--log-to-csv', action=argparse.BooleanOptionalAction, default=True, help='if True, metrics are stored locallly in a csv file in the log directory')
     parser.add_argument('--log-to-wandb', action=argparse.BooleanOptionalAction, default=False, help='if True, metrics are logged to Weights & Biases')
@@ -111,7 +111,7 @@ def get_args():
 
     # make sure we select the correct model backbone!
     if args['task'] in {'compression'} and args['backbone'] != 'autoencoder':
-        print(f'Setting model backbone to "autoencoder", which is required for the compression task!')
+        print('Setting model backbone to "autoencoder", which is required for the compression task!')
         args['backbone'] = 'autoencoder'
 
     return args
@@ -128,6 +128,7 @@ def train(
     wandb_project: str = 'MAD',
     save_checkpoints: bool = True,
     load_checkpoint = None,
+    allow_compatible = False,
     eval_only: bool = False
 ) -> pd.DataFrame:
     """
@@ -154,7 +155,7 @@ def train(
 
     # Check if results exist already.
 
-    if os.path.exists(log_path) and mad_config.use_cache:
+    if os.path.exists(log_path) and mad_config.use_cache and not eval_only:
         path_results_df = os.path.join(log_path, 'results.csv')
         if os.path.exists(path_results_df):
             results_df = pd.read_csv(path_results_df)
@@ -165,7 +166,13 @@ def train(
 
     # PyTorch Lightning Model Wrap.
     if load_checkpoint is not None:
-        model_wrapped = PLModelWrap.load_from_checkpoint(load_checkpoint, model=model, mad_config=mad_config)
+        if allow_compatible:
+            checkpoint = torch.load(load_checkpoint, weights_only=False)
+            state_dict = checkpoint['state_dict']
+            load_compatible_dict(model, state_dict)
+            model_wrapped = PLModelWrap(model=model, mad_config=mad_config)
+        else:
+            model_wrapped = PLModelWrap.load_from_checkpoint(load_checkpoint, model=model, mad_config=mad_config)
     else:
         model_wrapped = PLModelWrap(model=model, mad_config=mad_config)
 
@@ -183,7 +190,7 @@ def train(
     )
 
     # Make Dataloaders.
-        
+
     train_dl = DataLoader(
         dataset=data['train'],
         batch_size=mad_config.batch_size,
@@ -201,7 +208,7 @@ def train(
     )
 
     # Make Loggers & Callbacks.
-    
+
     early_stop = pl.callbacks.EarlyStopping(
         monitor='test/Accuracy_epoch',
         min_delta=0.00,
@@ -241,17 +248,12 @@ def train(
 
     if log_to_wandb:
         # We import wandb here so it doesn't create any random directories in /tmp
-        # when not user name, module in model.named_modules():
-    #     if isinstance(module, nn.Linear):
-    #         if 's_proj' in name:
-    #             module.weight.requires_grad = True
-    #         else:
-    #             module.weight.requires_grad = Falsed
-        import wandb 
+        import wandb
         wandb.init(
             project=wandb_project,
             name=os.path.basename(log_path) if log_path is not None else None
         )
+        wandb.run.log_code(".")
         loggers.append(pl.loggers.WandbLogger())
 
     # set default precision of float32 matrix multiplications:
@@ -274,7 +276,7 @@ def train(
     if eval_only:
         result = trainer.test(model_wrapped, test_dl)[0]
         return result
-    
+
     trainer.fit(model_wrapped, train_dl, test_dl)
 
     # Evaluate Final Performance.
@@ -308,12 +310,12 @@ if __name__ == '__main__':
 
     mad_config = MADConfig()
     mad_config.update_from_kwargs(args)
-    
+
     # create model config:
 
     model_config = MADModelConfig()
     model_config.update_from_kwargs(args)
-    model = model_config.build_model_from_registry()    
+    model = model_config.build_model_from_registry()
     model_id = '-'.join(layer_registry[l]['shorthand'] for l in model_config.layers)
 
     # train model:
@@ -325,25 +327,16 @@ if __name__ == '__main__':
     )
 
     print(model)
-    ckpt = torch.load('hybrid-2k-2.ckpt', weights_only=False)
-    state_dict = ckpt['state_dict']
-    new_state_dict = {}
-    for key, value in state_dict.items():
-        # if '.model' in key:
-        #     pos = key.find('.model')
-        #     new_key = key[6:pos] + key[pos+6:]
-        # else:
-        new_key = key[6:]
-        new_state_dict[new_key] = value
-    load_compatible_dict(model, new_state_dict)
     model.train()
+
+    # import torch.nn as nn
     # for name, module in model.named_modules():
     #     if isinstance(module, nn.Linear):
-    #         if 's_proj' in name:
+    #         if 'sep' in name:
     #             module.weight.requires_grad = True
     #         else:
     #             module.weight.requires_grad = False
-    
+
     train(
         model=model,
         mad_config=mad_config,
@@ -353,5 +346,6 @@ if __name__ == '__main__':
         wandb_project=args['wandb_project'],
         save_checkpoints=args['save_checkpoints'],
         load_checkpoint=args['load_checkpoint'],
+        allow_compatible=args['allow_compatible'],
         eval_only=args['eval_only']
     )

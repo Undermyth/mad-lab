@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from fla import DeltaNet
+from fla.layers import DeltaNet
 
 class DeltaAttention(nn.Module):
 
@@ -18,6 +18,7 @@ class DeltaAttention(nn.Module):
             expand_k=expand_k,
             expand_v=expand_v,
             num_heads=num_heads,
+            use_gate=False
         )
     
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs):

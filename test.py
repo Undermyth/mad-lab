@@ -1,17 +1,16 @@
-# %%
-import torch
+import numpy as np
+from mad.data.instances import generate_distract_fuzzy_in_context_recall_instance
 
-# %%
-ckpt = torch.load('hybrid-2k-2.ckpt', weights_only=False)
-state_dict = ckpt['state_dict']
+instance = generate_distract_fuzzy_in_context_recall_instance(
+    vocab_size=32,
+    seq_len=64,
+    k_motif_size=4,
+    v_motif_size=1,
+    is_training=False,
+    noise_vocab_size=10,
+    frac_noise=0.1,
+    # rng=np.random.default_rng(seed=1044)
+)
+print(instance)
 
-# %%
-state_dict['model.model.0.1.threshold'] = torch.ones(1, 1, 2, 1).cuda() * 0.5
-state_dict['model.model.2.1.threshold'] = torch.ones(1, 1, 2, 1).cuda() * 0.5
-# state_dict['model.model.0.1.s_proj.weight'] = torch.nn.Linear(64, 2, bias=False).weight
-# state_dict['model.model.2.1.s_proj.weight'] = torch.nn.Linear(64, 2, bias=False).weight
-
-# %%
-ckpt['state_dict'] = state_dict
-torch.save(ckpt, 'hybrid-2k-th.ckpt')
-# %%
+from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM

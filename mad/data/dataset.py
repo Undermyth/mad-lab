@@ -233,7 +233,8 @@ class MemoryDataset(torch.utils.data.Dataset):
                 # we process in num_workers chunks to avoid cpu throttle!
                 # see: https://discuss.ray.io/t/using-a-subset-of-available-cpus
                 instances = []
-                for _ in range(0, num_examples, num_workers):
+                pbar = tqdm(range(0, num_examples, num_workers))
+                for _ in pbar:
                     chunk_instances = pool.map(f.remote, range(num_workers))
                     instances.extend(ray.get(chunk_instances))
             else:

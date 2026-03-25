@@ -3,6 +3,7 @@ from mad.data.instances import (
     generate_noisy_in_context_recall_instance,
     generate_fuzzy_in_context_recall_instance,
     generate_multiquery_fuzzy_in_context_recall_instance,
+    generate_distract_fuzzy_in_context_recall_instance,
     generate_memorization_instance,
     generate_compression_instance,
     generate_selective_copying_instance
@@ -31,6 +32,11 @@ task_registry = {
         'instance_fn': generate_multiquery_fuzzy_in_context_recall_instance,
         'cfg': 'configs/tasks/multi-query-fuzzy-recall.yml',
         'shorthand': 'MQFR',
+    },
+    'distract-fuzzy-recall': {
+        'instance_fn': generate_distract_fuzzy_in_context_recall_instance,
+        'cfg': 'configs/tasks/distract-fuzzy-recall.yml',
+        'shorthand': 'DFR',
     },
     'memorization': {
         'instance_fn': generate_memorization_instance,
@@ -167,6 +173,16 @@ layer_registry = {
         'module': layers.Switcher,
         'cfg': 'configs/layers/switcher.yml',
         'shorthand': 'swi'
+    },
+    'sep': {
+        'module': layers.SepLA,
+        'cfg': 'configs/layers/sepla.yml',
+        'shorthand': 'sep'
+    },
+    'mesa': {
+        'module': layers.MesaAttention,
+        'cfg': 'configs/layers/mesa.yml',
+        'shorthand': 'mesa'
     }
 }
 

@@ -7,28 +7,30 @@ from mad.model import PLModelWrap
 mad_config = MADConfig()
 mad_model_config = MADModelConfig()
 args = {
-    'layers': ['linear-attention', 'swiglu', 'linear-attention', 'swiglu'],
+    'layers': ['sep', 'swiglu', 'sep', 'swiglu'],
     'dim': 64,
     'vocab_size': 64,
 }
 mad_model_config.update_from_kwargs(args)
 model = mad_model_config.build_model_from_registry()
-checkpoint_path = 'checkpoints/lin-fuzzy3-base-64.ckpt'
+checkpoint_path = 'checkpoints/sep-fuzzy3-sigmoid-base-64.ckpt'
 model = PLModelWrap.load_from_checkpoint(checkpoint_path, model=model, mad_config=mad_config)
 
 data = torch.tensor([[
-    62, 62, 62, 62, 12, 23, 19, 33, 22, 13, 18, 40, 13, 15, 18, 31,  6, 18,
-    19, 38,  3, 15, 21, 28, 19, 21, 23, 41, 10,  7, 24, 39, 25, 16, 26, 37,
-    20, 27, 13, 54,  9, 27,  4, 54,  3, 23, 21, 52, 15, 20, 13, 34, 15, 26,
-    17, 50, 12, 14, 15, 42, 63,  3, 15, 21
+    62, 62, 62, 62, 13, 20, 22, 55,  5, 12, 27, 35,  5, 10,  7, 55, 60, 60,
+    60, 58, 17, 23,  0, 45, 11, 19, 16, 48, 17, 16, 21, 42, 14, 19, 18, 42,
+    21, 22,  9, 36, 13, 15, 22, 51, 23, 22, 15, 47, 60, 60, 60, 57,  7,  9,
+    11, 30, 23, 25,  4, 50, 63, 13, 20, 22
 ]]).cuda()
-# data = torch.tensor([[
-#     62, 62, 62, 62, 12, 23, 19, 33, 22, 13, 18, 40, 13, 15, 18, 31,  6, 18,
-#     19, 38,  3, 15, 21, 28, 19, 21, 23, 41, 10,  7, 24, 39, 25, 16, 26, 37,
-#     20, 27, 13, 54,  9, 27,  4, 54,  4, 23, 12, 52, 15, 20, 13, 34, 15, 26,
-#     17, 50, 12, 14, 15, 42, 63,  3, 15, 21
-# ]]).cuda()
+data = torch.tensor([[
+    62, 62, 62, 62, 13, 20, 22, 55,  5, 12, 27, 35,  5, 10,  7, 55, 60, 60,
+    60, 58, 17, 23,  0, 45, 11, 19, 16, 48, 17, 16, 21, 42, 14, 19, 18, 42,
+    21, 22,  9, 36, 14, 27, 21, 51, 23, 22, 15, 47, 60, 60, 60, 57,  7,  9,
+    11, 30, 23, 25,  4, 50, 63, 13, 20, 22
+]]).cuda()
 output = model(data)
+if isinstance(output, tuple):
+    output = output[0]
 output = output.view(-1, output.size(-1))
 print(output.argmax(axis=-1))
 
@@ -51,48 +53,19 @@ plt.tight_layout()
 plt.show()
 
 # %%
-layer = 0
+from torchinspect import RegisterHandler
+layer = 1
 head = 0
-import torch.nn as nn
 
-
-class LinearAttentionCapture(nn.Module):
-    def __init__(self, ori_module):
-        super().__init__()
-        self.ori_module = ori_module
-        self.q_capture = None
-        self.k_capture = None
-    def forward(self, 
-        hidden_states: torch.Tensor,
-        *args, **kwargs
-    ):
-        """
-        x (torch.Tensor): tensor of shape (b, d, l)
-        y (torch.Tensor): tensor of shape (b, d, l)
-        """
-        b, l, _ = hidden_states.size()
-        q, k, v = self.ori_module.proj_q(hidden_states), self.ori_module.proj_k(hidden_states), self.ori_module.proj_v(hidden_states)
-        q, _ = self.ori_module.q_conv(q, output_final_state=False)
-        k, _ = self.ori_module.k_conv(k, output_final_state=False)
-        q = q.view(b, l, self.ori_module.num_heads, self.ori_module.head_qk_dim).transpose(1, 2)
-        k = k.view(b, l, self.ori_module.num_heads, self.ori_module.head_qk_dim).transpose(1, 2)
-        v = v.view(b, l, self.ori_module.num_heads, self.ori_module.head_v_dim).transpose(1, 2)
-            
-        q, k = self.ori_module.feature_map_q(q), self.ori_module.feature_map_k(k)
-        if self.ori_module.norm_q:
-            q = q / (q.sum(-1, keepdim=True) + 1e-4)
-        if self.ori_module.norm_k:
-            k = k / (k.sum(-1, keepdim=True) + 1e-4)
-        self.q_capture = q
-        self.k_capture = k
-        return self.ori_module.parallel_forward(hidden_states, q, k, v)
-origin_attn = model.model.model[layer * 2][1]
-detector = LinearAttentionCapture(origin_attn)
-model.model.model[layer * 2][1] = detector
+handler = RegisterHandler(model.model.model[layer * 2], module_index=1, reusable=True)
+handler.register_onetime_record('sep_q', 'lin_attn_fwd')
+handler.register_onetime_record('sep_k', 'lin_attn_fwd')
+handler.apply()
 model(data)
-model.model.model[layer * 2][1] = origin_attn
-q = detector.q_capture[0][head]
-k = detector.k_capture[0][head]
+record = handler.get_record()
+handler.remove()
+q = record['sep_q'].transpose(1, 2)[0, head]
+k = record['sep_k'].transpose(1, 2)[0, head]
 
 print(q.max(), k.max())
 fig, axes = plt.subplots(1, 2, figsize=(24, 8))
@@ -118,7 +91,17 @@ plt.imshow(attn_map.detach().cpu().numpy(), cmap='gray', aspect='auto')
 plt.colorbar(label='Value')
 plt.xlabel('Query Token Index')
 plt.ylabel('Key Token Index')
-plt.title('Attention Map')
+plt.title(f'Attention Map (Layer {layer}, Head {head})')
+plt.show()
+
+# %%
+shuffle_k = k[torch.randperm(64), :]
+sim = (k / k.norm(dim=-1)) * (shuffle_k / shuffle_k.norm(dim=-1))
+sim = sim.sum(dim=-1).mean()
+print('average similarity: ', sim)
+print('k norms: ', k.norm(dim=-1))
+plt.hist(k.norm(dim=-1).detach().cpu().numpy(), bins=30)
+plt.title(f'Distribution of K Norm in Layer {layer}, Head {head}')
 plt.show()
 
 # %%
@@ -149,7 +132,7 @@ model.model.model[layer * 2][1] = origin_attn
 diff_in_attn_map = torch.matmul(failed_q, failed_k.t()) - torch.matmul(success_q, success_k.t())
 v_abs_max = max(abs(diff_in_attn_map.min()), abs(diff_in_attn_map.max()))
 plt.imshow(diff_in_attn_map.detach().cpu().numpy(), cmap='bwr', vmin=-v_abs_max, vmax=v_abs_max)
-plt.title('Diff in Attention Map')
+plt.title(f'Diff in Attention Map (Layer {layer}, Head {head})')
 plt.colorbar(label='Value')
 plt.xlabel('Key Token Index')
 plt.ylabel('Query Token Index')
@@ -163,3 +146,5 @@ x = np.array(
 print(x.shape)
 plt.imshow(x, aspect='auto')
 plt.colorbar()
+
+from torch.optim import Adam

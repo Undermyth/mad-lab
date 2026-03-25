@@ -1,6 +1,7 @@
-import torch
 import typing as tp
+
 import pytorch_lightning as pl
+import torch
 import torchmetrics as met
 from torch import nn
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
@@ -11,7 +12,7 @@ from mad.metrics import Accuracy
 class PLModelWrap(pl.LightningModule):
     """
     PyTorch Lightning model wrapper.
-    
+
     Args:
         model (nn.Module): Model to wrap.
         mad_config (MADConfig): MAD configuration.
@@ -56,47 +57,39 @@ class PLModelWrap(pl.LightningModule):
     ) -> tp.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, tp.Union[torch.Tensor, None]]:
         inputs, targets = batch
         outputs = self(inputs)
-        extend = None
+        aux_loss = None
         if isinstance(outputs, tuple):
-            extend = outputs[1]
+            aux_loss = outputs[1]
             outputs = outputs[0]
         loss = self.loss_fn(
             outputs.view(-1, outputs.size(-1)),
             targets.view(-1)
         )
-        if extend is not None:
-            mask = (targets != -100)
-            # [B, T, H, 1]
-            extend = extend.squeeze(-1).mean(dim=-1)
-            extend = extend * mask
-            quadratic = extend * (1 - extend)   # [B, T]
-            count = mask.sum(dim=-1)
-            # extend = ((extend + 2 * quadratic).sum(dim=-1) / count).mean()
-            extend = (extend.sum(dim=-1) / count).mean()
-            return loss, outputs, targets, extend
+        if aux_loss is not None:
+            return loss, outputs, targets, aux_loss / 2
         else:
             return loss, outputs, targets, None
-    
+
     def phase_step(self,
         batch: tuple,
         batch_idx: int,
         phase: str='train'
     ) -> tp.Dict[str, tp.Union[torch.Tensor, tp.Any]]:
-        loss, outputs, targets, extend = self.step(batch, batch_idx)
-        # extend = torch.log(extend + 1)
-        loss = loss + extend * 10
+        loss, outputs, targets, aux_loss = self.step(batch, batch_idx)
+        loss = loss + aux_loss if aux_loss is not None else loss
         self.log(f'{phase}/Loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log(f'{phase}/AuxLoss', extend * 10, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        if aux_loss is not None:
+            self.log(f'{phase}/AuxLoss', aux_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         metrics = getattr(self, f'{phase}_metrics')(outputs, targets)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        return {'loss': loss, "extend": extend, "outputs": outputs, "targets": targets}
-    
+        return {'loss': loss, "aux_loss": aux_loss, "outputs": outputs, "targets": targets}
+
     def training_step(self,
         batch: tuple,
         batch_idx: int
     ) -> tp.Dict[str, tp.Union[torch.Tensor, tp.Any]]:
         return self.phase_step(batch, batch_idx, phase='train')
-    
+
     def validation_step(self,
         batch: tuple,
         batch_idx: int
@@ -126,7 +119,7 @@ class PLModelWrap(pl.LightningModule):
             )
         else:
             raise ValueError(f"invalid optimizer: {self.mad_config.optimizer}")
-        
+
         # scheduler:
         if self.mad_config.scheduler == 'none':
             return optimizer
