@@ -1,2 +1,8 @@
-[tool.basedpyright]
-typeCheckingMode = "off"
+pe]
+disable_error_code = ["type-arg", "attr-defined", "override", "arg-type", "return-value", "assignment", "misc"]
+check_untyped_defs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+warn_unused_ignores = false
+

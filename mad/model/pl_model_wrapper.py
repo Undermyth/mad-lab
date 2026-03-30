@@ -51,6 +51,14 @@ class PLModelWrap(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
+    def on_before_optimizer_step(self, optimizer):
+        grads = []
+        for name, p in self.named_parameters():
+            if p.grad is not None and 'sep' in name:
+                grads.append(p.grad.norm().pow(2))
+        total_norm = torch.sqrt(sum(grads)) if grads else torch.tensor(0.0, device=self.device)
+        self.log('train/grad_norm', total_norm, on_step=True, prog_bar=False, sync_dist=True)
+
     def step(self,
         batch: tuple,
         batch_idx: int

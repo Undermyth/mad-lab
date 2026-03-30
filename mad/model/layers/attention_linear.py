@@ -76,17 +76,17 @@ class LinearAttention(nn.Module):
         self.q_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
-            activation='silu'
+            activation=None
         )
         self.k_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
-            activation='silu'
+            activation=None
         )
         self.v_conv1d = ShortConvolution(
             hidden_size=self.dim,
             kernel_size=4,
-            activation='silu'
+            activation=None
         )
 
     def assign_feature_map(self, feature_map: str, tie_feature_map_qk: bool = False):

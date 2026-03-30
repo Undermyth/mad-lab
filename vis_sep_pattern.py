@@ -13,7 +13,7 @@ args = {
 }
 mad_model_config.update_from_kwargs(args)
 model = mad_model_config.build_model_from_registry()
-checkpoint_path = 'checkpoints/sep-fuzzy3-sigmoid-base-64.ckpt'
+checkpoint_path = 'checkpoints/sep-fuzzy3-relu-base-64.ckpt'
 model = PLModelWrap.load_from_checkpoint(checkpoint_path, model=model, mad_config=mad_config)
 
 data = torch.tensor([[
@@ -22,12 +22,12 @@ data = torch.tensor([[
     21, 22,  9, 36, 13, 15, 22, 51, 23, 22, 15, 47, 60, 60, 60, 57,  7,  9,
     11, 30, 23, 25,  4, 50, 63, 13, 20, 22
 ]]).cuda()
-data = torch.tensor([[
-    62, 62, 62, 62, 13, 20, 22, 55,  5, 12, 27, 35,  5, 10,  7, 55, 60, 60,
-    60, 58, 17, 23,  0, 45, 11, 19, 16, 48, 17, 16, 21, 42, 14, 19, 18, 42,
-    21, 22,  9, 36, 14, 27, 21, 51, 23, 22, 15, 47, 60, 60, 60, 57,  7,  9,
-    11, 30, 23, 25,  4, 50, 63, 13, 20, 22
-]]).cuda()
+# data = torch.tensor([[
+#     62, 62, 62, 62, 13, 20, 22, 55,  5, 12, 27, 35,  5, 10,  7, 55, 60, 60,
+#     60, 58, 17, 23,  0, 45, 11, 19, 16, 48, 17, 16, 21, 42, 14, 19, 18, 42,
+#     21, 22,  9, 36, 14, 27, 21, 51, 23, 22, 15, 47, 60, 60, 60, 57,  7,  9,
+#     11, 30, 23, 25,  4, 50, 63, 13, 20, 22
+# ]]).cuda()
 output = model(data)
 if isinstance(output, tuple):
     output = output[0]
@@ -54,12 +54,14 @@ plt.show()
 
 # %%
 from torchinspect import RegisterHandler
-layer = 1
+layer = 0
 head = 0
 
 handler = RegisterHandler(model.model.model[layer * 2], module_index=1, reusable=True)
 handler.register_onetime_record('sep_q', 'lin_attn_fwd')
 handler.register_onetime_record('sep_k', 'lin_attn_fwd')
+# handler.register_onetime_record('q', '_sep_fwd_func(q, weight, bias)')
+# handler.register_onetime_record('k', '_sep_fwd_func(q, weight, bias)')
 handler.apply()
 model(data)
 record = handler.get_record()
@@ -89,14 +91,24 @@ plt.show()
 attn_map = torch.matmul(q, k.t())
 plt.imshow(attn_map.detach().cpu().numpy(), cmap='gray', aspect='auto')
 plt.colorbar(label='Value')
-plt.xlabel('Query Token Index')
-plt.ylabel('Key Token Index')
+plt.ylabel('Query Token Index')
+plt.xlabel('Key Token Index')
 plt.title(f'Attention Map (Layer {layer}, Head {head})')
 plt.show()
 
 # %%
+k_corr = torch.matmul(k, k.t())
+plt.imshow(k_corr.detach().cpu().numpy(), cmap='gray', aspect='auto')
+plt.ylabel('Key Token Index')
+plt.xlabel('Key Token Index')
+plt.title(f'Key Self Correlation (Layer {layer}, Head {head})')
+plt.show()
+
+# %%
 shuffle_k = k[torch.randperm(64), :]
-sim = (k / k.norm(dim=-1)) * (shuffle_k / shuffle_k.norm(dim=-1))
+normed_k = k / (k.norm(dim=-1, keepdim=True) + 1e-5)
+normed_shuffle_k = shuffle_k / (shuffle_k.norm(dim=-1, keepdim=True) + 1e-5)
+sim = normed_k * normed_shuffle_k
 sim = sim.sum(dim=-1).mean()
 print('average similarity: ', sim)
 print('k norms: ', k.norm(dim=-1))

@@ -268,7 +268,7 @@ def train(
         logger=loggers,
         enable_checkpointing=mad_config.save_checkpoints,
         callbacks=callbacks,
-        accumulate_grad_batches=4,
+        # accumulate_grad_batches=4,
         precision=mad_config.precision,
     )
 

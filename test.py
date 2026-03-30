@@ -1,16 +1,54 @@
-import numpy as np
-from mad.data.instances import generate_distract_fuzzy_in_context_recall_instance
+# %%
+import torch
+from fla.modules import ShortConvolution
 
-instance = generate_distract_fuzzy_in_context_recall_instance(
-    vocab_size=32,
-    seq_len=64,
-    k_motif_size=4,
-    v_motif_size=1,
-    is_training=False,
-    noise_vocab_size=10,
-    frac_noise=0.1,
-    # rng=np.random.default_rng(seed=1044)
+conv = ShortConvolution(
+    hidden_size=3,
+    kernel_size=4,
+    bias=False,
+    activation=None,
 )
-print(instance)
+print(conv.weight.shape)
 
-from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
+conv.weight.data = torch.tensor(
+    [[1, 2, 3], [4, 5, 6], [-1, -2, -3], [-4, -5, -6]]
+).float().unsqueeze(dim=1)
+
+print(conv.weight.shape)
+
+conv = conv.cuda()
+
+# %%
+x = torch.ones(1, 6, 3).cuda()
+print(conv(x))
+
+# %%
+import torch
+from fla.modules import ShortConvolution
+
+conv = ShortConvolution(
+    hidden_size=3,
+    kernel_size=4,
+    bias=False,
+    activation=None,
+    backend='triton' 
+)
+print(conv.weight.shape)
+
+# fake_weight = torch.tensor([[i + j - 4 for i in range(3)] for j in range(4)]).float()
+# fake_weight = torch.tensor([[1, 2, 3], [4, 5, 6], [-1, -2, -3], [-4, -5, 6]]).float()
+# conv.weight.data = fake_weight.transpose(0, 1).unsqueeze(dim=1)
+
+conv.weight.data = torch.tensor(
+    [[1, 2, 3], [4, 5, 6], [-1, -2, -3], [-4, -5, -6]]
+).float().transpose(0, 1).unsqueeze(dim=1)
+
+print(conv.weight.shape)
+
+conv = conv.cuda()
+
+# %%
+x = torch.ones(1, 6, 3).cuda()
+print(conv(x))
+# %%
+
